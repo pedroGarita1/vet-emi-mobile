@@ -1,0 +1,428 @@
+﻿import { useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
+import { SPECIES_OPTIONS } from '../../config';
+import { ConsultationFormValues, ConsultationItem, InventoryItem, MedicationLine } from '../../types';
+import { AppButton } from '../ui/AppButton';
+import { LabeledInput } from '../ui/LabeledInput';
+import { LabeledSelect } from '../ui/LabeledSelect';
+import { SectionCard } from '../ui/SectionCard';
+import { StepMenu } from '../ui/StepMenu';
+
+type Props = {
+  consultations: ConsultationItem[];
+  inventory: InventoryItem[];
+  loading: boolean;
+  onCreate: (payload: ConsultationFormValues) => Promise<void>;
+};
+
+function emptyMedication(): MedicationLine {
+  return {
+    id: `med-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    inventory_label: '',
+    quantity: '1',
+    unit_price: '0',
+    dosage: '',
+    frequency_hours: '',
+    duration_days: '',
+    notes: '',
+  };
+}
+
+export function ConsultationsSection({ consultations, inventory, loading, onCreate }: Props) {
+  const [mode, setMode] = useState<'list' | 'form'>('list');
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [selectedPet, setSelectedPet] = useState('');
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, string>>({});
+  const [petName, setPetName] = useState('');
+  const [species, setSpecies] = useState('Canino');
+  const [petBreed, setPetBreed] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [petSize, setPetSize] = useState('');
+  const [consultedAt, setConsultedAt] = useState(new Date().toISOString().slice(0, 16));
+  const [cost, setCost] = useState('0');
+  const [diagnosis, setDiagnosis] = useState('');
+  const [treatment, setTreatment] = useState('');
+  const [medications, setMedications] = useState<MedicationLine[]>([emptyMedication()]);
+
+  const petsCatalog = consultations.reduce<Array<{ key: string; pet_name: string; owner_name: string; species: string; pet_breed: string; pet_size: string }>>(
+    (acc, item) => {
+      const key = `${item.pet_name}|${item.owner_name}`.toLowerCase();
+      if (!acc.some((entry) => entry.key === key)) {
+        acc.push({
+          key,
+          pet_name: item.pet_name,
+          owner_name: item.owner_name,
+          species: item.species,
+          pet_breed: item.pet_breed,
+          pet_size: item.pet_size,
+        });
+      }
+
+      return acc;
+    },
+    []
+  );
+
+  const diagnosisCatalog = consultations.reduce<string[]>((acc, item) => {
+    const value = item.diagnosis.trim();
+    if (value && !acc.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
+      acc.push(value);
+    }
+    return acc;
+  }, []);
+
+  const speciesCatalog = Array.from(
+    new Set([...SPECIES_OPTIONS, ...consultations.map((item) => item.species).filter(Boolean)])
+  );
+
+  const pricingMap = consultations.reduce<Record<string, { total: number; count: number }>>((acc, item) => {
+    const key = `${item.species.trim().toLowerCase()}|${item.diagnosis.trim().toLowerCase()}`;
+    if (!key.endsWith('|') && !key.startsWith('|')) {
+      const current = acc[key] ?? { total: 0, count: 0 };
+      current.total += item.cost;
+      current.count += 1;
+      acc[key] = current;
+    }
+    return acc;
+  }, {});
+
+  const resolveCost = (nextSpecies: string, nextDiagnosis: string) => {
+    const key = `${nextSpecies.trim().toLowerCase()}|${nextDiagnosis.trim().toLowerCase()}`;
+    const resolved = pricingMap[key];
+
+    if (!resolved || resolved.count === 0) {
+      return;
+    }
+
+    const avg = resolved.total / resolved.count;
+    setCost(avg.toFixed(2));
+  };
+
+  const onPetChange = (value: string) => {
+    setSelectedPet(value);
+    if (!value) {
+      return;
+    }
+
+    const pet = petsCatalog.find((entry) => entry.key === value);
+    if (!pet) {
+      return;
+    }
+
+    setPetName(pet.pet_name);
+    setSpecies(pet.species || 'Canino');
+    setOwnerName(pet.owner_name || '');
+    setPetBreed(pet.pet_breed || '');
+    setPetSize(pet.pet_size || '');
+    resolveCost(pet.species || 'Canino', diagnosis);
+  };
+
+  const onDiagnosisChange = (value: string) => {
+    setDiagnosis(value);
+    resolveCost(species, value);
+  };
+
+  const onSpeciesChange = (value: string) => {
+    setSpecies(value);
+    resolveCost(value, diagnosis);
+  };
+
+  const baseStepDone = Boolean(selectedPet || (petName.trim() && species.trim() && ownerName.trim()));
+  const treatmentStepDone = Boolean(treatment.trim());
+  const productsStepDone = medications.some((line) => line.inventory_label.trim());
+
+  const onMedicationSelect = (id: string, value: string) => {
+    setSelectedProducts((current) => ({ ...current, [id]: value }));
+
+    const selected = inventory.find((item) => String(item.remote_id ?? item.local_id) === value);
+
+    if (!selected) {
+      return;
+    }
+
+    const label = selected.presentation ? `${selected.name} - ${selected.presentation}` : selected.name;
+
+    setMedications((current) =>
+      current.map((line) =>
+        line.id === id
+          ? {
+              ...line,
+              inventory_label: label,
+              unit_price: selected.unit_price.toFixed(2),
+            }
+          : line
+      )
+    );
+  };
+
+  const updateMedication = (id: string, key: keyof MedicationLine, value: string) => {
+    setMedications((current) => current.map((line) => (line.id === id ? { ...line, [key]: value } : line)));
+  };
+
+  const addMedication = () => {
+    setMedications((current) => [...current, emptyMedication()]);
+  };
+
+  const removeMedication = (id: string) => {
+    setMedications((current) => (current.length === 1 ? current : current.filter((line) => line.id !== id)));
+    setSelectedProducts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    await onCreate({
+      pet_name: petName.trim(),
+      species,
+      owner_name: ownerName.trim(),
+      pet_breed: petBreed.trim(),
+      pet_size: petSize.trim(),
+      diagnosis: diagnosis.trim(),
+      treatment: treatment.trim(),
+      cost: Number(cost || 0),
+      consulted_at: new Date(consultedAt).toISOString(),
+      medications_json: JSON.stringify(medications),
+    });
+
+    setPetName('');
+    setSelectedPet('');
+    setSelectedProducts({});
+    setPetBreed('');
+    setOwnerName('');
+    setPetSize('');
+    setConsultedAt(new Date().toISOString().slice(0, 16));
+    setCost('0');
+    setDiagnosis('');
+    setTreatment('');
+    setMedications([emptyMedication()]);
+    setStep(1);
+    setMode('list');
+  };
+
+  const stepProgress = [
+    { label: 'Paso 1', percent: baseStepDone ? 100 : step === 1 ? 42 : 0 },
+    { label: 'Paso 2', percent: treatmentStepDone ? 100 : step === 2 ? 50 : 0 },
+    { label: 'Paso 3', percent: productsStepDone ? 100 : step === 3 ? 65 : 0 },
+  ];
+
+  return (
+    <View className="gap-3">
+      {mode === 'list' ? (
+        <SectionCard title="Ultimas consultas" subtitle="Vista inicial con los ultimos registros capturados.">
+          <AppButton label="Agregar nuevo" onPress={() => setMode('form')} style={{ marginBottom: 8 }} />
+
+          <View className="overflow-hidden rounded-xl border border-slate-200">
+            <View className="flex-row bg-slate-100 px-3 py-2">
+              <Text className="flex-1 text-[11px] font-black uppercase text-slate-600">Mascota</Text>
+              <Text className="flex-1 text-[11px] font-black uppercase text-slate-600">Diagnostico</Text>
+              <Text className="w-20 text-right text-[11px] font-black uppercase text-slate-600">Costo</Text>
+            </View>
+            {consultations.slice(0, 12).map((item) => (
+              <View key={item.local_id} className="flex-row items-center border-t border-slate-200 bg-white px-3 py-2">
+                <Text className="flex-1 text-[12px] font-bold text-slate-900" numberOfLines={1}>{item.pet_name}</Text>
+                <Text className="flex-1 text-[12px] text-slate-600" numberOfLines={1}>{item.diagnosis}</Text>
+                <Text className="w-20 text-right text-[12px] font-extrabold text-violet-700">${item.cost.toFixed(2)}</Text>
+              </View>
+            ))}
+            {consultations.length === 0 ? <Text className="px-3 py-3 text-slate-500">No hay consultas registradas.</Text> : null}
+          </View>
+        </SectionCard>
+      ) : null}
+
+      {mode === 'form' ? (
+        <SectionCard title="Nueva consulta" subtitle="Formulario por pasos con menu tipo Aguas.">
+          <View className="flex-row justify-end">
+            <Pressable onPress={() => setMode('list')} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5">
+              <Text className="text-[12px] font-bold text-slate-700">Volver a tabla</Text>
+            </Pressable>
+          </View>
+
+          <StepMenu steps={stepProgress} currentStep={step} onSelectStep={(next) => setStep(next as 1 | 2 | 3)} />
+
+        {step === 1 ? (
+          <View className="gap-2">
+            <Text className="text-[15px] font-black text-slate-900">Datos base</Text>
+
+            <LabeledSelect
+              label="Mascota registrada"
+              selectedValue={selectedPet}
+              onValueChange={onPetChange}
+              options={petsCatalog.map((pet) => ({
+                label: `${pet.pet_name}${pet.owner_name ? ` - ${pet.owner_name}` : ''}`,
+                value: pet.key,
+              }))}
+              placeholderLabel="Selecciona mascota"
+              placeholderValue=""
+              selectedLabel={selectedPet ? `${petName}${ownerName ? ` - ${ownerName}` : ''}` : ''}
+              helperText="Al elegir mascota se completan especie, propietario, raza y talla."
+            />
+
+            <LabeledInput label="Mascota" value={petName} onChangeText={setPetName} />
+
+            <LabeledSelect
+              label="Especie"
+              selectedValue={species}
+              onValueChange={onSpeciesChange}
+              options={speciesCatalog.map((item) => ({ label: item, value: item }))}
+              helperText="La especie ayuda a sugerir costos historicos por diagnostico."
+            />
+
+            <View className="flex-row gap-2">
+              <View className="flex-1">
+                <LabeledInput label="Tipo" value={petBreed} onChangeText={setPetBreed} placeholder="Raza" editable={!selectedPet} />
+              </View>
+              <View className="flex-1">
+                <LabeledInput label="Propietario" value={ownerName} onChangeText={setOwnerName} />
+              </View>
+            </View>
+
+            <View className="flex-row gap-2">
+              <View className="flex-1">
+                <LabeledInput
+                  label="Talla"
+                  value={petSize}
+                  onChangeText={setPetSize}
+                  placeholder="Pequena/Mediana/Grande"
+                  editable={!selectedPet}
+                />
+              </View>
+              <View className="flex-1">
+                <LabeledInput label="Fecha y hora" value={consultedAt} onChangeText={setConsultedAt} placeholder="YYYY-MM-DDTHH:mm" />
+              </View>
+            </View>
+
+            <View className="flex-row gap-2">
+              <View className="flex-1">
+                <LabeledInput label="Costo" value={cost} onChangeText={setCost} keyboardType="numeric" />
+              </View>
+              <View className="flex-[2]">
+                <LabeledInput label="Diagnostico" value={diagnosis} onChangeText={onDiagnosisChange} />
+              </View>
+            </View>
+
+            {diagnosisCatalog.length > 0 ? (
+              <View className="flex-row flex-wrap gap-2">
+                {diagnosisCatalog.slice(0, 8).map((item) => (
+                  <Pressable
+                    key={item}
+                    onPress={() => onDiagnosisChange(item)}
+                    className="rounded-full border border-violet-300 bg-violet-50 px-2.5 py-1"
+                  >
+                    <Text className="text-[12px] font-bold text-violet-800">{item}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {step === 2 ? (
+          <View className="gap-2">
+            <Text className="text-[15px] font-black text-slate-900">Tratamiento</Text>
+            <LabeledInput
+              label="Detalle clinico"
+              value={treatment}
+              onChangeText={setTreatment}
+              multiline
+              numberOfLines={5}
+              style={{ textAlignVertical: 'top', minHeight: 110 }}
+            />
+          </View>
+        ) : null}
+
+        {step === 3 ? (
+          <View className="gap-2">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-[15px] font-black text-slate-900">Productos</Text>
+              <Pressable onPress={addMedication} className="rounded-lg bg-violet-100 px-2.5 py-1.5">
+                <Text className="font-extrabold text-violet-800">+ Producto</Text>
+              </Pressable>
+            </View>
+
+            {medications.map((line) => (
+              <View key={line.id} className="gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                <LabeledSelect
+                  label="Producto de inventario"
+                  selectedValue={selectedProducts[line.id] ?? ''}
+                  onValueChange={(value) => onMedicationSelect(line.id, value)}
+                  options={inventory.map((item) => ({
+                    label: item.presentation ? `${item.name} - ${item.presentation}` : item.name,
+                    value: String(item.remote_id ?? item.local_id),
+                  }))}
+                  placeholderLabel="Selecciona producto"
+                  placeholderValue=""
+                  selectedLabel={line.inventory_label}
+                />
+
+                <LabeledInput
+                  label="Medicacion / producto"
+                  value={line.inventory_label}
+                  onChangeText={(value) => updateMedication(line.id, 'inventory_label', value)}
+                />
+
+                <View className="flex-row gap-2">
+                  <View className="flex-1">
+                    <LabeledInput label="Cantidad" value={line.quantity} onChangeText={(value) => updateMedication(line.id, 'quantity', value)} keyboardType="numeric" />
+                  </View>
+                  <View className="flex-1">
+                    <LabeledInput label="Precio" value={line.unit_price} onChangeText={(value) => updateMedication(line.id, 'unit_price', value)} keyboardType="numeric" />
+                  </View>
+                </View>
+
+                <View className="flex-row gap-2">
+                  <View className="flex-1">
+                    <LabeledInput label="Dosis" value={line.dosage} onChangeText={(value) => updateMedication(line.id, 'dosage', value)} />
+                  </View>
+                  <View className="flex-1">
+                    <LabeledInput
+                      label="Frecuencia (hrs)"
+                      value={line.frequency_hours}
+                      onChangeText={(value) => updateMedication(line.id, 'frequency_hours', value)}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <LabeledInput
+                      label="Duracion (dias)"
+                      value={line.duration_days}
+                      onChangeText={(value) => updateMedication(line.id, 'duration_days', value)}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+
+                <LabeledInput label="Notas" value={line.notes} onChangeText={(value) => updateMedication(line.id, 'notes', value)} />
+
+                <Pressable onPress={() => removeMedication(line.id)} className="self-end">
+                  <Text className="font-bold text-red-700">Quitar</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <View className="flex-row gap-2">
+          <AppButton
+            label="Anterior"
+            onPress={() => setStep((current) => (current === 1 ? 1 : ((current - 1) as 1 | 2 | 3)))}
+            disabled={step === 1}
+            style={{ flex: 1, backgroundColor: '#64748b' }}
+          />
+          {step < 3 ? (
+            <AppButton
+              label="Siguiente"
+              onPress={() => setStep((current) => (current === 3 ? 3 : ((current + 1) as 1 | 2 | 3)))}
+              style={{ flex: 1 }}
+            />
+          ) : (
+            <AppButton label="Guardar consulta" onPress={submit} loading={loading} disabled={!petName.trim() || !diagnosis.trim()} style={{ flex: 1 }} />
+          )}
+        </View>
+      </SectionCard>
+      ) : null}
+    </View>
+  );
+}
+

@@ -1,91 +1,98 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios, { AxiosError } from 'axios';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, SafeAreaView, Text, View } from 'react-native';
+import './global.css';
+import { DEFAULT_EMAIL, DEFAULT_PASSWORD } from './src/config';
+import { DashboardScreen } from './src/screens/DashboardScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { login, logout, me } from './src/services/api';
+import { refreshRemoteIntoLocal, syncPendingToServer } from './src/services/sync';
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-type User = {
-  id: number;
-  name: string;
-  email: string;
-};
-
-type InventoryItem = {
-  id: number;
-  name: string;
-  category: string;
-  stock: number;
-  unit_price: number;
-};
-
-type Sale = {
-  id: number;
-  product_name: string;
-  quantity: number;
-  total: number;
-  customer_name: string | null;
-  sold_at: string;
-};
-
-type Consultation = {
-  id: number;
-  pet_name: string;
-  species: string;
-  owner_name: string;
-  diagnosis: string;
-  consulted_at: string;
-};
-
-type Section = 'inventory' | 'sales' | 'consultations';
-
-const API_BASE_URL = 'http://10.0.2.2:8000/api';
-const TOKEN_KEY = 'emi_api_token';
+  getConsultations,
+  getInventoryItems,
+  getSales,
+  initLocalDb,
+  savePendingConsultation,
+  savePendingInventory,
+  savePendingSale,
+} from './src/storage/localDb';
+import { clearSession, loadSession, saveSession } from './src/storage/session';
+import { ui } from './src/styles/theme';
+import {
+  ConsultationFormValues,
+  ConsultationItem,
+  InventoryFormValues,
+  InventoryItem,
+  SaleFormValues,
+  SaleItem,
+  Section,
+  SessionState,
+} from './src/types';
 
 export default function App() {
-  const [email, setEmail] = useState('demo@emi.com');
-  const [password, setPassword] = useState('EmiVet123*');
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState(DEFAULT_EMAIL);
+  const [password, setPassword] = useState(DEFAULT_PASSWORD);
+  const [sede, setSede] = useState('Matriz');
+  const [session, setSession] = useState<SessionState | null>(null);
+
   const [booting, setBooting] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<Section>('inventory');
+  const [activeSection, setActiveSection] = useState<Section>('home');
 
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [consultations, setConsultations] = useState<Consultation[]>([]);
+  const [sales, setSales] = useState<SaleItem[]>([]);
+  const [consultations, setConsultations] = useState<ConsultationItem[]>([]);
 
-  const [saleProduct, setSaleProduct] = useState('');
-  const [saleQty, setSaleQty] = useState('1');
-  const [salePrice, setSalePrice] = useState('0');
+  const refreshLocalLists = async () => {
+    const [localInventory, localSales, localConsultations] = await Promise.all([
+      getInventoryItems(),
+      getSales(),
+      getConsultations(),
+    ]);
 
-  const [petName, setPetName] = useState('');
-  const [petSpecies, setPetSpecies] = useState('Canino');
-  const [ownerName, setOwnerName] = useState('');
-  const [diagnosis, setDiagnosis] = useState('');
+    setInventory(localInventory);
+    setSales(localSales);
+    setConsultations(localConsultations);
+  };
 
-  const api = useMemo(() => axios.create({ baseURL: API_BASE_URL }), []);
+  const syncEverything = async (token: string) => {
+    setSyncing(true);
+
+    try {
+      await syncPendingToServer(token);
+      await refreshRemoteIntoLocal(token);
+    } finally {
+      await refreshLocalLists();
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
       try {
-        const storedToken = await AsyncStorage.getItem(TOKEN_KEY);
-        if (!storedToken) {
+        await initLocalDb();
+        await refreshLocalLists();
+
+        const saved = await loadSession();
+        if (!saved) {
           return;
         }
 
-        setToken(storedToken);
-        await fetchProfile(storedToken);
+        const profile = await me(saved.token);
+        const hydrated: SessionState = { ...saved, user: profile };
+        setSession(hydrated);
+        await saveSession(hydrated);
+
+        try {
+          await syncEverything(saved.token);
+        } catch {
+          await refreshLocalLists();
+        }
+      } catch {
+        await clearSession();
+        setSession(null);
       } finally {
         setBooting(false);
       }
@@ -94,471 +101,160 @@ export default function App() {
     void init();
   }, []);
 
-  const fetchProfile = async (authToken: string) => {
-    const response = await api.get<{ user: User }>('/me', {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-
-    setUser(response.data.user);
-    await fetchModules(authToken);
-  };
-
-  const fetchModules = async (authToken: string) => {
-    const headers = { Authorization: `Bearer ${authToken}` };
-
-    const [inventoryRes, salesRes, consultationsRes] = await Promise.all([
-      api.get<{ data: InventoryItem[] }>('/inventory-items', { headers }),
-      api.get<{ data: Sale[] }>('/sales', { headers }),
-      api.get<{ data: Consultation[] }>('/consultations', { headers }),
-    ]);
-
-    setInventory(inventoryRes.data.data);
-    setSales(salesRes.data.data);
-    setConsultations(consultationsRes.data.data);
-  };
-
   const handleLogin = async () => {
-    setLoading(true);
+    setBusy(true);
     setError(null);
 
     try {
-      const response = await api.post<{
-        token: string;
-        user: User;
-      }>('/login', {
-        email,
-        password,
-        device_name: 'emi-expo-app',
-      });
+      const response = await login(email, password, sede);
+      const nextSession: SessionState = {
+        token: response.token,
+        user: response.user,
+        sede,
+      };
 
-      await AsyncStorage.setItem(TOKEN_KEY, response.data.token);
-      setToken(response.data.token);
-      setUser(response.data.user);
-      await fetchModules(response.data.token);
-    } catch (err) {
-      const axiosErr = err as AxiosError<{ message?: string }>;
-      setError(axiosErr.response?.data?.message ?? 'No se pudo iniciar sesion.');
+      setSession(nextSession);
+      await saveSession(nextSession);
+
+      try {
+        await syncEverything(nextSession.token);
+      } catch {
+        await refreshLocalLists();
+      }
+    } catch {
+      setError('No se pudo iniciar sesion. Verifica credenciales o conexion.');
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   const handleLogout = async () => {
-    setLoading(true);
-    setError(null);
+    if (!session) {
+      return;
+    }
+
+    setBusy(true);
 
     try {
-      if (token) {
-        await api.post(
-          '/logout',
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-      }
+      await logout(session.token);
     } catch {
-      // Si el token ya no existe en servidor, igual limpiamos estado local.
+      // Mantiene salida local aunque falle el endpoint remoto.
     } finally {
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      setToken(null);
-      setUser(null);
-      setInventory([]);
-      setSales([]);
-      setConsultations([]);
-      setLoading(false);
+      await clearSession();
+      setSession(null);
+      setBusy(false);
     }
   };
 
-  const createSale = async () => {
-    if (!token) {
+  const handleCreateInventory = async (payload: InventoryFormValues) => {
+    await savePendingInventory(payload);
+    await refreshLocalLists();
+
+    if (!session) {
       return;
     }
 
     try {
-      setLoading(true);
-      await api.post(
-        '/sales',
-        {
-          product_name: saleProduct,
-          quantity: Number(saleQty),
-          unit_price: Number(salePrice),
-          sold_at: new Date().toISOString(),
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setSaleProduct('');
-      setSaleQty('1');
-      setSalePrice('0');
-      await fetchModules(token);
-      Alert.alert('Venta registrada', 'El movimiento se guardo correctamente.');
+      await syncEverything(session.token);
+      Alert.alert('Inventario', 'Producto sincronizado con servidor.');
     } catch {
-      Alert.alert('Error', 'No se pudo registrar la venta.');
-    } finally {
-      setLoading(false);
+      Alert.alert('Guardado offline', 'Producto guardado en SQLite. Se sincronizara cuando haya internet.');
     }
   };
 
-  const createConsultation = async () => {
-    if (!token) {
+  const handleCreateSale = async (payload: SaleFormValues) => {
+    await savePendingSale(payload);
+    await refreshLocalLists();
+
+    if (!session) {
       return;
     }
 
     try {
-      setLoading(true);
-      await api.post(
-        '/consultations',
-        {
-          pet_name: petName,
-          species: petSpecies,
-          owner_name: ownerName,
-          diagnosis,
-          consulted_at: new Date().toISOString(),
-          cost: 25,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setPetName('');
-      setOwnerName('');
-      setDiagnosis('');
-      await fetchModules(token);
-      Alert.alert('Consulta registrada', 'La consulta fue guardada.');
+      await syncEverything(session.token);
+      Alert.alert('Venta', 'Venta sincronizada con servidor.');
     } catch {
-      Alert.alert('Error', 'No se pudo registrar la consulta.');
-    } finally {
-      setLoading(false);
+      Alert.alert('Guardado offline', 'Venta guardada en SQLite. Se sincronizara cuando haya internet.');
     }
   };
 
-  const renderInventory = () => (
-    <View style={styles.moduleCard}>
-      <Text style={styles.moduleTitle}>Inventario</Text>
-      {inventory.map((item) => (
-        <View key={item.id} style={styles.rowItem}>
-          <Text style={styles.rowTitle}>{item.name}</Text>
-          <Text style={styles.rowText}>{item.category} | Stock: {item.stock} | ${item.unit_price}</Text>
-        </View>
-      ))}
-      {inventory.length === 0 ? <Text style={styles.moduleText}>Sin productos.</Text> : null}
-    </View>
-  );
+  const handleCreateConsultation = async (payload: ConsultationFormValues) => {
+    await savePendingConsultation(payload);
+    await refreshLocalLists();
 
-  const renderSales = () => (
-    <View style={styles.moduleCard}>
-      <Text style={styles.moduleTitle}>Punto de Venta</Text>
-      <TextInput placeholder="Producto" style={styles.input} value={saleProduct} onChangeText={setSaleProduct} />
-      <View style={styles.rowInputs}>
-        <TextInput placeholder="Cantidad" keyboardType="numeric" style={[styles.input, styles.half]} value={saleQty} onChangeText={setSaleQty} />
-        <TextInput placeholder="Precio" keyboardType="numeric" style={[styles.input, styles.half]} value={salePrice} onChangeText={setSalePrice} />
-      </View>
-      <Pressable style={styles.button} onPress={createSale} disabled={loading}>
-        <Text style={styles.buttonText}>Registrar venta</Text>
-      </Pressable>
-      {sales.slice(0, 5).map((sale) => (
-        <View key={sale.id} style={styles.rowItem}>
-          <Text style={styles.rowTitle}>{sale.product_name}</Text>
-          <Text style={styles.rowText}>x{sale.quantity} | Total ${sale.total}</Text>
-        </View>
-      ))}
-    </View>
-  );
+    if (!session) {
+      return;
+    }
 
-  const renderConsultations = () => (
-    <View style={styles.moduleCard}>
-      <Text style={styles.moduleTitle}>Consultas</Text>
-      <TextInput placeholder="Mascota" style={styles.input} value={petName} onChangeText={setPetName} />
-      <TextInput placeholder="Especie" style={styles.input} value={petSpecies} onChangeText={setPetSpecies} />
-      <TextInput placeholder="Propietario" style={styles.input} value={ownerName} onChangeText={setOwnerName} />
-      <TextInput placeholder="Diagnostico" style={styles.input} value={diagnosis} onChangeText={setDiagnosis} />
-      <Pressable style={styles.button} onPress={createConsultation} disabled={loading}>
-        <Text style={styles.buttonText}>Registrar consulta</Text>
-      </Pressable>
-      {consultations.slice(0, 5).map((item) => (
-        <View key={item.id} style={styles.rowItem}>
-          <Text style={styles.rowTitle}>{item.pet_name} ({item.species})</Text>
-          <Text style={styles.rowText}>{item.owner_name} | {item.diagnosis}</Text>
-        </View>
-      ))}
-    </View>
-  );
+    try {
+      await syncEverything(session.token);
+      Alert.alert('Consulta', 'Consulta sincronizada con servidor.');
+    } catch {
+      Alert.alert('Guardado offline', 'Consulta guardada en SQLite. Se sincronizara cuando haya internet.');
+    }
+  };
+
+  const handleSyncNow = async () => {
+    if (!session) {
+      return;
+    }
+
+    try {
+      await syncEverything(session.token);
+      Alert.alert('Sincronizacion completa', 'Los datos locales y remotos estan actualizados.');
+    } catch {
+      Alert.alert('Sin conexion', 'No fue posible sincronizar ahora. Tus formularios siguen guardados offline.');
+    }
+  };
 
   if (booting) {
     return (
-      <SafeAreaView style={styles.centered}>
-        <ActivityIndicator size="large" color="#0b6e4f" />
-        <Text style={styles.bootText}>Cargando Emi...</Text>
+      <SafeAreaView style={ui.safeArea}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color="#047857" />
+          <Text style={{ marginTop: 12, color: '#475569' }}>Inicializando base local y sesion...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
-  if (!user) {
+  if (!session) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <>
         <StatusBar style="dark" />
-        <View style={styles.loginContainer}>
-          <Text style={styles.brand}>Emi Veterinaria</Text>
-          <Text style={styles.title}>Acceso movil</Text>
-          <Text style={styles.subtitle}>Inventario, POS y consultas en una sola app.</Text>
-
-          <TextInput
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="Correo"
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-          />
-
-          <TextInput
-            placeholder="Contrasena"
-            secureTextEntry
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <Pressable style={styles.button} onPress={handleLogin} disabled={loading}>
-            <Text style={styles.buttonText}>{loading ? 'Ingresando...' : 'Iniciar sesion'}</Text>
-          </Pressable>
-
-          <Text style={styles.helper}>
-            Si usas dispositivo fisico, cambia API_BASE_URL en App.tsx por la IP local de tu PC.
-          </Text>
-        </View>
-      </SafeAreaView>
+        <LoginScreen
+          email={email}
+          password={password}
+          sede={sede}
+          loading={busy}
+          error={error}
+          onEmailChange={setEmail}
+          onPasswordChange={setPassword}
+          onSedeChange={setSede}
+          onSubmit={() => void handleLogin()}
+        />
+      </>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <>
       <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.dashboardContainer}>
-        <View style={styles.heroCard}>
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.heroBrand}>Emi Veterinaria</Text>
-              <Text style={styles.welcome}>Hola, {user.name}</Text>
-              <Text style={styles.heroEmail}>{user.email}</Text>
-            </View>
-            <Pressable style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutButtonText}>Salir</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.tabs}>
-          <Pressable
-            style={[styles.tab, activeSection === 'inventory' && styles.tabActive]}
-            onPress={() => setActiveSection('inventory')}
-          >
-            <Text style={[styles.tabText, activeSection === 'inventory' && styles.tabTextActive]}>Inventario</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tab, activeSection === 'sales' && styles.tabActive]}
-            onPress={() => setActiveSection('sales')}
-          >
-            <Text style={[styles.tabText, activeSection === 'sales' && styles.tabTextActive]}>POS</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tab, activeSection === 'consultations' && styles.tabActive]}
-            onPress={() => setActiveSection('consultations')}
-          >
-            <Text style={[styles.tabText, activeSection === 'consultations' && styles.tabTextActive]}>Consultas</Text>
-          </Pressable>
-        </View>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={() => token && fetchModules(token)}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryButtonText}>Actualizar datos</Text>
-        </Pressable>
-
-        {activeSection === 'inventory' && renderInventory()}
-        {activeSection === 'sales' && renderSales()}
-        {activeSection === 'consultations' && renderConsultations()}
-      </ScrollView>
-    </SafeAreaView>
+      <DashboardScreen
+        user={session.user}
+        sede={session.sede}
+        syncing={syncing || busy}
+        activeSection={activeSection}
+        inventory={inventory}
+        sales={sales}
+        consultations={consultations}
+        onLogout={() => void handleLogout()}
+        onSync={() => void handleSyncNow()}
+        onChangeSection={setActiveSection}
+        onCreateInventory={handleCreateInventory}
+        onCreateSale={handleCreateSale}
+        onCreateConsultation={handleCreateConsultation}
+      />
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#eef3f0',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f6f8fb',
-  },
-  bootText: {
-    marginTop: 12,
-    color: '#4b5563',
-  },
-  loginContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  brand: {
-    color: '#0b6e4f',
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  subtitle: {
-    color: '#4b5563',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  button: {
-    marginTop: 6,
-    backgroundColor: '#0b6e4f',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
-  error: {
-    color: '#b91c1c',
-    fontWeight: '600',
-  },
-  helper: {
-    marginTop: 8,
-    color: '#6b7280',
-    fontSize: 12,
-  },
-  dashboardContainer: {
-    padding: 20,
-    gap: 14,
-  },
-  heroCard: {
-    backgroundColor: '#0a6b50',
-    borderRadius: 16,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 3,
-  },
-  tabs: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 10,
-    backgroundColor: '#d9e5df',
-  },
-  tabActive: {
-    backgroundColor: '#0b6e4f',
-  },
-  tabText: {
-    color: '#111827',
-    fontWeight: '700',
-  },
-  tabTextActive: {
-    color: '#fff',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  heroBrand: {
-    color: '#d1fae5',
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  welcome: {
-    fontSize: 24,
-    color: '#ffffff',
-    fontWeight: '800',
-  },
-  heroEmail: {
-    color: '#dcfce7',
-    marginTop: 2,
-  },
-  logoutButton: {
-    backgroundColor: '#064e3b',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  logoutButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#111827',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  secondaryButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  moduleCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    gap: 8,
-  },
-  moduleTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 6,
-    color: '#111827',
-  },
-  moduleText: {
-    color: '#374151',
-  },
-  rowInputs: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  half: {
-    flex: 1,
-  },
-  rowItem: {
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    paddingTop: 8,
-    marginTop: 4,
-  },
-  rowTitle: {
-    color: '#111827',
-    fontWeight: '700',
-  },
-  rowText: {
-    color: '#4b5563',
-  },
-});

@@ -1,0 +1,16 @@
+{
+  "name": "veterinaria-pastel-dark",
+  "colors": {
+    "blackSoft": "#252332",
+    "blackDeep": "#1b1826",
+    "purplePrimary": "#8b78b9",
+    "purpleDark": "#5d4a82",
+    "purpleLight": "#efeafb",
+    "grayBg": "#f2f0f7",
+    "graySurface": "#fbfafc",
+    "grayBorder": "#dad6e3",
+    "grayText": "#6f6a80",
+    "dangerSoft": "#b85b7a"
+  },
+  "theme": "Veterinaria moderna, pastel, negro-morado-grises"
+}
