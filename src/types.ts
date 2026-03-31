@@ -13,6 +13,22 @@ export type SessionState = {
   user: User;
 };
 
+export type TipoNotificacion = 'promocion' | 'cierre' | 'aviso' | 'otro';
+
+export type Notificacion = {
+  id: number;
+  titulo: string;
+  descripcion: string;
+  tipo: TipoNotificacion;
+  tipoFormato?: {
+    icono: string;
+    nombre: string;
+    color: string;
+  };
+  fecha_inicio: string;
+  fecha_fin: string | null;
+};
+
 export type InventoryItem = {
   local_id: string;
   remote_id: number | null;
