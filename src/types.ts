@@ -1,4 +1,4 @@
-export type Section = 'home' | 'inventory' | 'sales' | 'consultations';
+﻿export type Section = 'home' | 'inventory' | 'sales' | 'consultations' | 'estetica';
 export type SyncStatus = 'pending' | 'synced';
 
 export type User = {
@@ -27,6 +27,39 @@ export type Notificacion = {
   };
   fecha_inicio: string;
   fecha_fin: string | null;
+};
+
+export type PetCatalogItem = {
+  id: number;
+  name: string;
+  owner_name: string;
+  owner_email: string;
+  owner_phone: string;
+  breed: string;
+  size_category: string;
+  species_id: number | null;
+};
+
+export type SpeciesCatalogItem = {
+  id: number;
+  name: string;
+};
+
+export type PricingRuleItem = {
+  species_id: number;
+  diagnosis: string;
+  default_cost: number;
+};
+
+export type ConsultationCatalogData = {
+  pets: PetCatalogItem[];
+  species: SpeciesCatalogItem[];
+  pricing_rules: PricingRuleItem[];
+};
+
+export type MediaItem = {
+  id?: number;
+  image_path: string;
 };
 
 export type InventoryItem = {
@@ -74,6 +107,8 @@ export type MedicationLine = {
 export type ConsultationItem = {
   local_id: string;
   remote_id: number | null;
+  pet_id: number | null;
+  species_id: number | null;
   pet_name: string;
   species: string;
   owner_name: string;
@@ -83,7 +118,33 @@ export type ConsultationItem = {
   treatment: string;
   cost: number;
   consulted_at: string;
+  vaccination_applied: boolean;
+  vaccination_note: string;
+  next_vaccination_at: string;
+  deworming_applied: boolean;
+  deworming_note: string;
+  next_deworming_at: string;
   medications_json: string;
+  images_json: string;
+  sync_status: SyncStatus;
+  updated_at: string;
+};
+
+export type EsteticaItem = {
+  local_id: string;
+  remote_id: number | null;
+  pet_id: number | null;
+  pet_name: string;
+  owner_name: string;
+  owner_phone: string;
+  owner_email: string;
+  service_type: string;
+  status: 'pendiente' | 'en_proceso' | 'lista' | 'entregada';
+  notes: string;
+  requested_at: string;
+  ready_at: string;
+  notified_at: string;
+  images_json: string;
   sync_status: SyncStatus;
   updated_at: string;
 };
@@ -101,4 +162,9 @@ export type SaleFormValues = Omit<
 export type ConsultationFormValues = Omit<
   ConsultationItem,
   'local_id' | 'remote_id' | 'sync_status' | 'updated_at'
+>;
+
+export type EsteticaFormValues = Omit<
+  EsteticaItem,
+  'local_id' | 'remote_id' | 'sync_status' | 'updated_at' | 'ready_at' | 'notified_at'
 >;

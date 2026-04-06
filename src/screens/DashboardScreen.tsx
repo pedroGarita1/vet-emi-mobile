@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Animated, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
-import { ConsultationFormValues, ConsultationItem, InventoryFormValues, InventoryItem, SaleFormValues, SaleItem, Section, User } from '../types';
+import { ConsultationCatalogData, ConsultationFormValues, ConsultationItem, EsteticaFormValues, EsteticaItem, InventoryFormValues, InventoryItem, SaleFormValues, SaleItem, Section, User } from '../types';
 import { palette, ui } from '../styles/theme';
 import { AppButton } from '../components/ui/AppButton';
 import { InventorySection } from '../components/sections/InventorySection';
@@ -8,6 +8,7 @@ import { SalesSection } from '../components/sections/SalesSection';
 import { ConsultationsSection } from '../components/sections/ConsultationsSection';
 import { SideDrawer } from '../components/ui/SideDrawer';
 import { HomeSection } from '../components/sections/HomeSection';
+import { EsteticaSection } from '../components/sections/EsteticaSection';
 
 const DRAWER_WIDTH = 290;
 
@@ -19,12 +20,15 @@ type Props = {
   inventory: InventoryItem[];
   sales: SaleItem[];
   consultations: ConsultationItem[];
+  esteticaServices: EsteticaItem[];
+  consultationCatalogs: ConsultationCatalogData;
   onLogout: () => void;
   onSync: () => void;
   onChangeSection: (value: Section) => void;
   onCreateInventory: (payload: InventoryFormValues) => Promise<void>;
   onCreateSale: (payload: SaleFormValues) => Promise<void>;
   onCreateConsultation: (payload: ConsultationFormValues) => Promise<void>;
+  onCreateEstetica: (payload: EsteticaFormValues) => Promise<void>;
 };
 
 export function DashboardScreen({
@@ -35,12 +39,15 @@ export function DashboardScreen({
   inventory,
   sales,
   consultations,
+  esteticaServices,
+  consultationCatalogs,
   onLogout,
   onSync,
   onChangeSection,
   onCreateInventory,
   onCreateSale,
   onCreateConsultation,
+  onCreateEstetica,
 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -65,7 +72,8 @@ export function DashboardScreen({
   const pendingCount =
     inventory.filter((x) => x.sync_status === 'pending').length +
     sales.filter((x) => x.sync_status === 'pending').length +
-    consultations.filter((x) => x.sync_status === 'pending').length;
+    consultations.filter((x) => x.sync_status === 'pending').length +
+    esteticaServices.filter((x) => x.sync_status === 'pending').length;
 
   const sectionTitle =
     activeSection === 'home'
@@ -74,7 +82,9 @@ export function DashboardScreen({
         ? 'Inventario'
         : activeSection === 'sales'
           ? 'Punto de Venta'
-          : 'Consultas';
+          : activeSection === 'consultations'
+            ? 'Consultas'
+            : 'Estetica';
 
   const sectionDescription =
     activeSection === 'home'
@@ -83,7 +93,9 @@ export function DashboardScreen({
         ? 'Gestion y captura de productos en inventario.'
         : activeSection === 'sales'
           ? 'Registro de ventas y visualizacion del historial.'
-          : 'Captura completa de consultas y tratamientos.';
+          : activeSection === 'consultations'
+            ? 'Captura completa de consultas y tratamientos.'
+            : 'Servicios de estetica con autollenado de datos del dueño.';
 
   return (
     <SafeAreaView style={ui.safeArea}>
@@ -154,8 +166,20 @@ export function DashboardScreen({
             <ConsultationsSection
               consultations={consultations}
               inventory={inventory}
+              petsCatalog={consultationCatalogs.pets}
+              speciesCatalog={consultationCatalogs.species}
+              pricingRules={consultationCatalogs.pricing_rules}
               loading={syncing}
               onCreate={onCreateConsultation}
+            />
+          ) : null}
+
+          {activeSection === 'estetica' ? (
+            <EsteticaSection
+              services={esteticaServices}
+              petsCatalog={consultationCatalogs.pets}
+              loading={syncing}
+              onCreate={onCreateEstetica}
             />
           ) : null}
         </View>

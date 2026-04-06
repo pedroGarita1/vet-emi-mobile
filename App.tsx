@@ -5,22 +5,27 @@ import './global.css';
 import { DEFAULT_EMAIL, DEFAULT_PASSWORD } from './src/config';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
-import { login, logout, me } from './src/services/api';
+import { fetchConsultationCatalogs, login, logout, me } from './src/services/api';
 import { refreshRemoteIntoLocal, syncPendingToServer } from './src/services/sync';
 import {
   getConsultations,
+  getEsteticaServices,
   getInventoryItems,
   getSales,
   initLocalDb,
   savePendingConsultation,
+  savePendingEstetica,
   savePendingInventory,
   savePendingSale,
 } from './src/storage/localDb';
 import { clearSession, loadSession, saveSession } from './src/storage/session';
 import { ui } from './src/styles/theme';
 import {
+  ConsultationCatalogData,
   ConsultationFormValues,
   ConsultationItem,
+  EsteticaFormValues,
+  EsteticaItem,
   InventoryFormValues,
   InventoryItem,
   SaleFormValues,
@@ -44,17 +49,25 @@ export default function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [sales, setSales] = useState<SaleItem[]>([]);
   const [consultations, setConsultations] = useState<ConsultationItem[]>([]);
+  const [esteticaServices, setEsteticaServices] = useState<EsteticaItem[]>([]);
+  const [consultationCatalogs, setConsultationCatalogs] = useState<ConsultationCatalogData>({
+    pets: [],
+    species: [],
+    pricing_rules: [],
+  });
 
   const refreshLocalLists = async () => {
-    const [localInventory, localSales, localConsultations] = await Promise.all([
+    const [localInventory, localSales, localConsultations, localEsteticaServices] = await Promise.all([
       getInventoryItems(),
       getSales(),
       getConsultations(),
+      getEsteticaServices(),
     ]);
 
     setInventory(localInventory);
     setSales(localSales);
     setConsultations(localConsultations);
+    setEsteticaServices(localEsteticaServices);
   };
 
   const syncEverything = async (token: string) => {
@@ -63,6 +76,8 @@ export default function App() {
     try {
       await syncPendingToServer(token);
       await refreshRemoteIntoLocal(token);
+      const catalogs = await fetchConsultationCatalogs(token);
+      setConsultationCatalogs(catalogs);
     } finally {
       await refreshLocalLists();
       setSyncing(false);
@@ -88,6 +103,12 @@ export default function App() {
         try {
           await syncEverything(saved.token);
         } catch {
+          try {
+            const catalogs = await fetchConsultationCatalogs(saved.token);
+            setConsultationCatalogs(catalogs);
+          } catch {
+            // Mantiene funcionamiento offline aunque falle catalogo.
+          }
           await refreshLocalLists();
         }
       } catch {
@@ -194,6 +215,22 @@ export default function App() {
     }
   };
 
+  const handleCreateEstetica = async (payload: EsteticaFormValues) => {
+    await savePendingEstetica(payload);
+    await refreshLocalLists();
+
+    if (!session) {
+      return;
+    }
+
+    try {
+      await syncEverything(session.token);
+      Alert.alert('Estetica', 'Servicio sincronizado con servidor.');
+    } catch {
+      Alert.alert('Guardado offline', 'Servicio guardado en SQLite. Se sincronizara cuando haya internet.');
+    }
+  };
+
   const handleSyncNow = async () => {
     if (!session) {
       return;
@@ -248,12 +285,15 @@ export default function App() {
         inventory={inventory}
         sales={sales}
         consultations={consultations}
+        esteticaServices={esteticaServices}
+        consultationCatalogs={consultationCatalogs}
         onLogout={() => void handleLogout()}
         onSync={() => void handleSyncNow()}
         onChangeSection={setActiveSection}
         onCreateInventory={handleCreateInventory}
         onCreateSale={handleCreateSale}
         onCreateConsultation={handleCreateConsultation}
+        onCreateEstetica={handleCreateEstetica}
       />
     </>
   );

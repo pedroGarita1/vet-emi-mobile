@@ -1,6 +1,6 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 import { API_BASE_URL } from '../config';
-import { User } from '../types';
+import { ConsultationCatalogData, EsteticaItem, PetCatalogItem, SpeciesCatalogItem, User } from '../types';
 
 type InventoryApiItem = {
   id: number;
@@ -30,6 +30,8 @@ type SaleApiItem = {
 
 type ConsultationApiItem = {
   id: number;
+  pet_id?: number | null;
+  species_id?: number | null;
   pet_name: string;
   species: string;
   owner_name: string;
@@ -37,6 +39,17 @@ type ConsultationApiItem = {
   treatment?: string | null;
   cost: number;
   consulted_at: string;
+  vaccination_applied?: boolean;
+  vaccination_note?: string | null;
+  next_vaccination_at?: string | null;
+  deworming_applied?: boolean;
+  deworming_note?: string | null;
+  next_deworming_at?: string | null;
+  petCatalog?: {
+    breed?: string | null;
+    size_category?: string | null;
+  } | null;
+  images?: Array<{ id: number; image_path: string }>;
   updated_at?: string;
 };
 
@@ -47,6 +60,15 @@ const client = axios.create({
 
 function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
+}
+
+export function buildFileUrl(path: string) {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+
+  const base = API_BASE_URL.replace(/\/api\/?$/, '');
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${normalized}`;
 }
 
 export async function login(email: string, password: string, sede: string) {
@@ -69,6 +91,20 @@ export async function me(token: string) {
 
 export async function logout(token: string) {
   await client.post('/logout', {}, { headers: authHeader(token) });
+}
+
+export async function fetchConsultationCatalogs(token: string): Promise<ConsultationCatalogData> {
+  const response = await client.get<{
+    data: {
+      species: SpeciesCatalogItem[];
+      pets: PetCatalogItem[];
+      pricing_rules: Array<{ species_id: number; diagnosis: string; default_cost: number }>;
+    };
+  }>('/catalogs/consultations-data', {
+    headers: authHeader(token),
+  });
+
+  return response.data.data;
 }
 
 export async function fetchInventory(token: string) {
@@ -95,6 +131,14 @@ export async function fetchConsultations(token: string) {
   return response.data.data;
 }
 
+export async function fetchEsteticaServices(token: string) {
+  const response = await client.get<{ data: EsteticaItem[] }>('/estetica-services', {
+    headers: authHeader(token),
+  });
+
+  return response.data.data;
+}
+
 export async function createInventory(token: string, payload: Record<string, unknown>) {
   const response = await client.post<{ data: { id: number } }>('/inventory-items', payload, {
     headers: authHeader(token),
@@ -113,7 +157,21 @@ export async function createSale(token: string, payload: Record<string, unknown>
 
 export async function createConsultation(token: string, payload: Record<string, unknown>) {
   const response = await client.post<{ data: { id: number } }>('/consultations', payload, {
-    headers: authHeader(token),
+    headers: {
+      ...authHeader(token),
+      'Content-Type': 'application/json',
+    },
+  });
+
+  return response.data.data.id;
+}
+
+export async function createEsteticaService(token: string, payload: Record<string, unknown>) {
+  const response = await client.post<{ data: { id: number } }>('/estetica-services', payload, {
+    headers: {
+      ...authHeader(token),
+      'Content-Type': 'application/json',
+    },
   });
 
   return response.data.data.id;

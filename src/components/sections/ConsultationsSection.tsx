@@ -1,7 +1,7 @@
 ﻿import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SPECIES_OPTIONS } from '../../config';
-import { ConsultationFormValues, ConsultationItem, InventoryItem, MedicationLine } from '../../types';
+import { ConsultationFormValues, ConsultationItem, InventoryItem, MedicationLine, PetCatalogItem, PricingRuleItem, SpeciesCatalogItem } from '../../types';
 import { AppButton } from '../ui/AppButton';
 import { LabeledInput } from '../ui/LabeledInput';
 import { LabeledSelect } from '../ui/LabeledSelect';
@@ -11,6 +11,9 @@ import { StepMenu } from '../ui/StepMenu';
 type Props = {
   consultations: ConsultationItem[];
   inventory: InventoryItem[];
+  petsCatalog: PetCatalogItem[];
+  speciesCatalog: SpeciesCatalogItem[];
+  pricingRules: PricingRuleItem[];
   loading: boolean;
   onCreate: (payload: ConsultationFormValues) => Promise<void>;
 };
@@ -28,11 +31,21 @@ function emptyMedication(): MedicationLine {
   };
 }
 
-export function ConsultationsSection({ consultations, inventory, loading, onCreate }: Props) {
+export function ConsultationsSection({
+  consultations,
+  inventory,
+  petsCatalog,
+  speciesCatalog,
+  pricingRules,
+  loading,
+  onCreate,
+}: Props) {
   const [mode, setMode] = useState<'list' | 'form'>('list');
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedPet, setSelectedPet] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<Record<string, string>>({});
+  const [petId, setPetId] = useState<number | null>(null);
+  const [speciesId, setSpeciesId] = useState<number | null>(null);
   const [petName, setPetName] = useState('');
   const [species, setSpecies] = useState('Canino');
   const [petBreed, setPetBreed] = useState('');
@@ -42,26 +55,24 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
   const [cost, setCost] = useState('0');
   const [diagnosis, setDiagnosis] = useState('');
   const [treatment, setTreatment] = useState('');
+  const [vaccinationApplied, setVaccinationApplied] = useState(false);
+  const [vaccinationNote, setVaccinationNote] = useState('');
+  const [nextVaccinationAt, setNextVaccinationAt] = useState('');
+  const [dewormingApplied, setDewormingApplied] = useState(false);
+  const [dewormingNote, setDewormingNote] = useState('');
+  const [nextDewormingAt, setNextDewormingAt] = useState('');
   const [medications, setMedications] = useState<MedicationLine[]>([emptyMedication()]);
 
-  const petsCatalog = consultations.reduce<Array<{ key: string; pet_name: string; owner_name: string; species: string; pet_breed: string; pet_size: string }>>(
-    (acc, item) => {
-      const key = `${item.pet_name}|${item.owner_name}`.toLowerCase();
-      if (!acc.some((entry) => entry.key === key)) {
-        acc.push({
-          key,
-          pet_name: item.pet_name,
-          owner_name: item.owner_name,
-          species: item.species,
-          pet_breed: item.pet_breed,
-          pet_size: item.pet_size,
-        });
-      }
-
-      return acc;
-    },
-    []
-  );
+  const petOptions = petsCatalog.map((pet) => ({
+    key: String(pet.id),
+    pet_id: pet.id,
+    species_id: pet.species_id,
+    pet_name: pet.name,
+    owner_name: pet.owner_name,
+    species: speciesCatalog.find((item) => item.id === pet.species_id)?.name || 'Canino',
+    pet_breed: pet.breed,
+    pet_size: pet.size_category,
+  }));
 
   const diagnosisCatalog = consultations.reduce<string[]>((acc, item) => {
     const value = item.diagnosis.trim();
@@ -71,18 +82,18 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
     return acc;
   }, []);
 
-  const speciesCatalog = Array.from(
-    new Set([...SPECIES_OPTIONS, ...consultations.map((item) => item.species).filter(Boolean)])
+  const speciesOptions = Array.from(
+    new Set([...SPECIES_OPTIONS, ...speciesCatalog.map((item) => item.name).filter(Boolean), ...consultations.map((item) => item.species).filter(Boolean)])
   );
 
-  const pricingMap = consultations.reduce<Record<string, { total: number; count: number }>>((acc, item) => {
-    const key = `${item.species.trim().toLowerCase()}|${item.diagnosis.trim().toLowerCase()}`;
-    if (!key.endsWith('|') && !key.startsWith('|')) {
-      const current = acc[key] ?? { total: 0, count: 0 };
-      current.total += item.cost;
-      current.count += 1;
-      acc[key] = current;
+  const pricingMap = pricingRules.reduce<Record<string, number>>((acc, rule) => {
+    const speciesName = speciesCatalog.find((item) => item.id === rule.species_id)?.name || '';
+    if (!speciesName || !rule.diagnosis) {
+      return acc;
     }
+
+    const key = `${speciesName.trim().toLowerCase()}|${rule.diagnosis.trim().toLowerCase()}`;
+    acc[key] = Number(rule.default_cost || 0);
     return acc;
   }, {});
 
@@ -90,12 +101,11 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
     const key = `${nextSpecies.trim().toLowerCase()}|${nextDiagnosis.trim().toLowerCase()}`;
     const resolved = pricingMap[key];
 
-    if (!resolved || resolved.count === 0) {
+    if (typeof resolved !== 'number') {
       return;
     }
 
-    const avg = resolved.total / resolved.count;
-    setCost(avg.toFixed(2));
+    setCost(resolved.toFixed(2));
   };
 
   const onPetChange = (value: string) => {
@@ -104,11 +114,13 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
       return;
     }
 
-    const pet = petsCatalog.find((entry) => entry.key === value);
+    const pet = petOptions.find((entry) => entry.key === value);
     if (!pet) {
       return;
     }
 
+    setPetId(pet.pet_id || null);
+    setSpeciesId(pet.species_id || null);
     setPetName(pet.pet_name);
     setSpecies(pet.species || 'Canino');
     setOwnerName(pet.owner_name || '');
@@ -124,6 +136,8 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
 
   const onSpeciesChange = (value: string) => {
     setSpecies(value);
+    const found = speciesCatalog.find((item) => item.name.toLowerCase() === value.toLowerCase());
+    setSpeciesId(found ? found.id : null);
     resolveCost(value, diagnosis);
   };
 
@@ -174,6 +188,8 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
 
   const submit = async () => {
     await onCreate({
+      pet_id: petId,
+      species_id: speciesId,
       pet_name: petName.trim(),
       species,
       owner_name: ownerName.trim(),
@@ -183,10 +199,19 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
       treatment: treatment.trim(),
       cost: Number(cost || 0),
       consulted_at: new Date(consultedAt).toISOString(),
+      vaccination_applied: vaccinationApplied,
+      vaccination_note: vaccinationNote.trim(),
+      next_vaccination_at: nextVaccinationAt.trim(),
+      deworming_applied: dewormingApplied,
+      deworming_note: dewormingNote.trim(),
+      next_deworming_at: nextDewormingAt.trim(),
       medications_json: JSON.stringify(medications),
+      images_json: '[]',
     });
 
     setPetName('');
+    setPetId(null);
+    setSpeciesId(null);
     setSelectedPet('');
     setSelectedProducts({});
     setPetBreed('');
@@ -196,6 +221,12 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
     setCost('0');
     setDiagnosis('');
     setTreatment('');
+    setVaccinationApplied(false);
+    setVaccinationNote('');
+    setNextVaccinationAt('');
+    setDewormingApplied(false);
+    setDewormingNote('');
+    setNextDewormingAt('');
     setMedications([emptyMedication()]);
     setStep(1);
     setMode('list');
@@ -249,7 +280,7 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
               label="Mascota registrada"
               selectedValue={selectedPet}
               onValueChange={onPetChange}
-              options={petsCatalog.map((pet) => ({
+              options={petOptions.map((pet) => ({
                 label: `${pet.pet_name}${pet.owner_name ? ` - ${pet.owner_name}` : ''}`,
                 value: pet.key,
               }))}
@@ -265,7 +296,7 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
               label="Especie"
               selectedValue={species}
               onValueChange={onSpeciesChange}
-              options={speciesCatalog.map((item) => ({ label: item, value: item }))}
+              options={speciesOptions.map((item) => ({ label: item, value: item }))}
               helperText="La especie ayuda a sugerir costos historicos por diagnostico."
             />
 
@@ -315,6 +346,41 @@ export function ConsultationsSection({ consultations, inventory, loading, onCrea
                 ))}
               </View>
             ) : null}
+
+            <View className="mt-2 gap-2 rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <Text className="text-[13px] font-extrabold text-violet-900">Control preventivo</Text>
+
+              <View className="flex-row gap-2">
+                <AppButton
+                  label={vaccinationApplied ? 'Vacunacion: si' : 'Vacunacion: no'}
+                  onPress={() => setVaccinationApplied((current) => !current)}
+                  style={{ flex: 1, backgroundColor: vaccinationApplied ? '#5d4a82' : '#8b78b9' }}
+                />
+                <AppButton
+                  label={dewormingApplied ? 'Desparasitacion: si' : 'Desparasitacion: no'}
+                  onPress={() => setDewormingApplied((current) => !current)}
+                  style={{ flex: 1, backgroundColor: dewormingApplied ? '#5d4a82' : '#8b78b9' }}
+                />
+              </View>
+
+              <View className="flex-row gap-2">
+                <View className="flex-1">
+                  <LabeledInput label="Nota vacuna" value={vaccinationNote} onChangeText={setVaccinationNote} />
+                </View>
+                <View className="flex-1">
+                  <LabeledInput label="Proxima vacuna" value={nextVaccinationAt} onChangeText={setNextVaccinationAt} placeholder="YYYY-MM-DD" />
+                </View>
+              </View>
+
+              <View className="flex-row gap-2">
+                <View className="flex-1">
+                  <LabeledInput label="Nota desparasitacion" value={dewormingNote} onChangeText={setDewormingNote} />
+                </View>
+                <View className="flex-1">
+                  <LabeledInput label="Proxima desparasitacion" value={nextDewormingAt} onChangeText={setNextDewormingAt} placeholder="YYYY-MM-DD" />
+                </View>
+              </View>
+            </View>
           </View>
         ) : null}
 

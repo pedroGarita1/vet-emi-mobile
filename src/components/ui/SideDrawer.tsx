@@ -18,6 +18,7 @@ const entries: Array<{ key: Section; label: string; icon: string }> = [
   { key: 'inventory', label: 'Inventario', icon: 'I' },
   { key: 'sales', label: 'Punto de venta', icon: 'P' },
   { key: 'consultations', label: 'Consultas', icon: 'C' },
+  { key: 'estetica', label: 'Estetica', icon: 'E' },
 ];
 
 export const SideDrawer = memo(function SideDrawer({
