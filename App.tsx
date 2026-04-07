@@ -2,7 +2,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, SafeAreaView, Text, View } from 'react-native';
 import './global.css';
-import { DEFAULT_EMAIL, DEFAULT_PASSWORD } from './src/config';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { fetchConsultationCatalogs, login, logout, me } from './src/services/api';
@@ -35,8 +34,8 @@ import {
 } from './src/types';
 
 export default function App() {
-  const [email, setEmail] = useState(DEFAULT_EMAIL);
-  const [password, setPassword] = useState(DEFAULT_PASSWORD);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [sede, setSede] = useState('Matriz');
   const [session, setSession] = useState<SessionState | null>(null);
 

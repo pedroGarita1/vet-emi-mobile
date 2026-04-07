@@ -1,10 +1,28 @@
 import { Platform } from 'react-native';
 
-export const API_BASE_URL =
-  Platform.OS === 'android' ? 'http://10.0.2.2:8001/api' : 'http://127.0.0.1:8001/api';
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '');
+}
 
-export const DEFAULT_EMAIL = 'demo@emi.com';
-export const DEFAULT_PASSWORD = 'EmiVet123*';
+function resolveApiOrigin() {
+  const explicitOrigin = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (explicitOrigin) {
+    return trimTrailingSlash(explicitOrigin);
+  }
+
+  if (Platform.OS === 'android') {
+    return 'http://10.0.2.2:8000';
+  }
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:8000`;
+  }
+
+  return 'http://127.0.0.1:8000';
+}
+
+export const API_ORIGIN = resolveApiOrigin();
+export const API_BASE_URL = `${API_ORIGIN}/api`;
 
 export const SEDES = ['Matriz', 'Sucursal Norte', 'Sucursal Sur'] as const;
 

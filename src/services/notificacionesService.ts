@@ -1,5 +1,6 @@
 import { Notificacion } from '../types';
 import * as Network from 'expo-network';
+import { API_ORIGIN } from '../config';
 
 /**
  * Obtener notificaciones activas desde el servidor
@@ -18,7 +19,7 @@ export async function obtenerNotificacionesActivas(): Promise<Notificacion[]> {
     const idTimeout = setTimeout(() => controlador.abort(), 10000);
 
     const respuesta = await fetch(
-      `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'}/api/notificaciones`,
+      `${API_ORIGIN}/api/notificaciones`,
       {
         method: 'GET',
         headers: {
@@ -65,7 +66,7 @@ export async function obtenerNotificacion(notificacionId: number): Promise<Notif
     const idTimeout = setTimeout(() => controlador.abort(), 10000);
 
     const respuesta = await fetch(
-      `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'}/api/notificaciones/${notificacionId}`,
+      `${API_ORIGIN}/api/notificaciones/${notificacionId}`,
       {
         method: 'GET',
         headers: {
